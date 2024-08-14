@@ -1,6 +1,8 @@
 services:
   webhook-queue-delay:
-    build: https://github.com/lr-24/webhook-queue-delay.git
+    build:
+      context: https://github.com/lr-24/webhook-queue-delay.git
+      dockerfile: Dockerfile
     ports:
       - "3304:5000"
     environment:
@@ -8,4 +10,6 @@ services:
       - API_BASE_URL=http://192.168.1.50:8080  # Replace with your API server's IP and port
       - FIREFLY_API_KEY=your_api_key_here  # Replace with your actual API key
       - WEBHOOK_ID=123  # Replace with your actual webhook ID if needed
+    volumes:
+      - ./logs:/app/logs
     restart: unless-stopped
