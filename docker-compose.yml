@@ -1,6 +1,6 @@
 services:
   webhook-queue-delay:
-    build: .
+    build: https://github.com/lr-24/webhook-queue-delay.git
     ports:
       - "3304:5000"
     environment:
