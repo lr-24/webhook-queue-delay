@@ -19,9 +19,9 @@ RUN mkdir -p /app/logs && chmod 777 /app/logs
 # Make port 5000 available to the world outside this container
 EXPOSE 5000
 
-# Define environment variable
+# Define environment variables
 ENV FLASK_APP=app.py
 ENV FLASK_RUN_HOST=0.0.0.0
 
-# Run app.py when the container launches
-CMD ["python", "app.py"]
+# Use Gunicorn to run the Flask app
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "app:app"]
