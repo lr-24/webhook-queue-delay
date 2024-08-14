@@ -15,6 +15,11 @@ API_BASE_URL = os.getenv('API_BASE_URL', 'https://demo.firefly-iii.org')
 FIREFLY_API_KEY = os.getenv('FIREFLY_API_KEY')
 WEBHOOK_ID = os.getenv('WEBHOOK_ID', '1')  # Default to '1' if not set
 
+# Print the environment variables for debugging
+print(f"API_BASE_URL: {API_BASE_URL}")
+print(f"FIREFLY_API_KEY: {FIREFLY_API_KEY}")
+print(f"WEBHOOK_ID: {WEBHOOK_ID}")
+
 def process_message(message):
     try:
         # Extract 'id' from the message
