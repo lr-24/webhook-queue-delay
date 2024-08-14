@@ -48,22 +48,21 @@ if not all([API_BASE_URL, FIREFLY_API_KEY, WEBHOOK_ID]):
 
 def process_message(message):
     try:
-        # Extract 'id' from the message
         transaction_id = message['content']['id']
         logger.info(f"Processing transaction ID: {transaction_id}")
         
-        # Wait for 2 minutes (120 seconds)
         time.sleep(120)
         
-        # Perform the API request
         api_url = f'{API_BASE_URL}/api/v1/webhooks/{WEBHOOK_ID}/trigger-transaction/{transaction_id}'
         headers = {
             'accept': '*/*',
-            'Authorization': f'Bearer {FIREFLY_API_KEY}'
+            'Authorization': f'Bearer {FIREFLY_API_KEY}',
+            'Content-Type': 'application/json'  # Add this line
         }
-        response = requests.post(api_url, headers=headers, data={})
         
-        # Log the response for debugging
+        # Send an empty JSON object as data
+        response = requests.post(api_url, headers=headers, json={})
+        
         logger.info(f'API response for transaction {transaction_id}: Status {response.status_code}')
         logger.debug(f'API response content: {response.text}')
     except KeyError:
