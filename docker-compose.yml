@@ -1,0 +1,8 @@
+services:
+  webhook-queue-delay:
+    build: .
+    ports:
+      - "3304:5000"
+    environment:
+      - FLASK_APP=app.py
+    restart: unless-stopped
