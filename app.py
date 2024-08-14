@@ -25,10 +25,10 @@ def process_message(message):
         # Extract 'id' from the message
         transaction_id = message['content']['id']
         print(f"Processing transaction ID: {transaction_id}")
-        
+
         # Wait for 2 minutes (120 seconds)
         time.sleep(120)
-        
+
         # Perform the API request
         api_url = f'{API_BASE_URL}/api/v1/webhooks/{WEBHOOK_ID}/trigger-transaction/{transaction_id}'
         headers = {
@@ -36,7 +36,7 @@ def process_message(message):
             'Authorization': f'Bearer {FIREFLY_API_KEY}'
         }
         response = requests.post(api_url, headers=headers, data={})
-        
+
         # Log the response for debugging
         print(f'API response: {response.status_code}, {response.text}')
     except Exception as e:
@@ -48,13 +48,13 @@ def webhook():
     try:
         message = request.json
         print(f"Received message: {message}")  # Log the received message
-        
+
         # Add the message to the queue
         message_queue.put(message)
-        
+
         # Start a new thread to process the message
-        threading.Thread(target=process_message, args=(message,)).start()
-        
+        threading.Thread(target=process_message, args=(message,), daemon=True).start()
+
         return jsonify({"status": "received"}), 200
     except Exception as e:
         # Log any exceptions that occur
@@ -62,4 +62,5 @@ def webhook():
         return jsonify({"status": "error"}), 500
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)  # Enable debug mode
+    # Enable debug mode for Flask
+    app.run(host='0.0.0.0', port=5000, debug=True)
