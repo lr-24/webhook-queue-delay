@@ -1,3 +1,5 @@
+version: '3'
+
 services:
   webhook-queue-delay:
     build:
@@ -10,6 +12,38 @@ services:
       - API_BASE_URL=http://192.168.1.50:8080  # Replace with your API server's IP and port
       - FIREFLY_API_KEY=your_api_key_here  # Replace with your actual API key
       - WEBHOOK_ID=123  # Replace with your actual webhook ID if needed
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
     volumes:
       - ./logs:/app/logs
+    depends_on:
+      - redis
     restart: unless-stopped
+
+  celery-worker:
+    build:
+      context: https://github.com/lr-24/webhook-queue-delay.git
+      dockerfile: Dockerfile
+    command: celery -A app.celery worker --loglevel=info
+    environment:
+      - API_BASE_URL=http://192.168.1.50:8080
+      - FIREFLY_API_KEY=your_api_key_here
+      - WEBHOOK_ID=123
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    volumes:
+      - ./logs:/app/logs
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  redis:
+    image: "redis:alpine"
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    restart: unless-stopped
+
+volumes:
+  redis-data:
