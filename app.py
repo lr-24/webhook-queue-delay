@@ -41,8 +41,8 @@ logger.info(f"WEBHOOK_ID: {WEBHOOK_ID}")
 if not all([API_BASE_URL, FIREFLY_API_KEY, WEBHOOK_ID]):
     logger.error("One or more required environment variables are not set.")
 
-WAIT_BEFORE_PROCESSING = 120  # 2 minutes
-MIN_DELAY_BETWEEN_CALLS = 30  # 30 seconds
+WAIT_BEFORE_PROCESSING = 30  # 30 seconds
+MIN_DELAY_BETWEEN_CALLS = 29  # 30 seconds (should not be necessary, but just as a precaution
 
 def process_transaction(transaction_id):
     try:
