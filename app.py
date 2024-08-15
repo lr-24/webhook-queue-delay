@@ -1,4 +1,4 @@
-Copyfrom flask import Flask, request, jsonify
+from flask import Flask, request, jsonify
 import threading
 import time
 import requests
