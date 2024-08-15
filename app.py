@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify
+Copyfrom flask import Flask, request, jsonify
 import threading
 import time
 import requests
@@ -46,6 +46,7 @@ MIN_DELAY_BETWEEN_CALLS = 30  # 30 seconds
 
 def process_transaction(transaction_id):
     try:
+        logger.info(f"Starting to process transaction ID: {transaction_id}")
         api_url = f'{API_BASE_URL}/api/v1/webhooks/{WEBHOOK_ID}/trigger-transaction/{transaction_id}'
         headers = {
             'accept': '/',
@@ -53,6 +54,7 @@ def process_transaction(transaction_id):
             'Content-Type': 'application/json'
         }
         
+        logger.info(f"Sending API request for transaction ID: {transaction_id}")
         response = requests.post(api_url, headers=headers, json={})
         logger.info(f'API response for transaction {transaction_id}: Status {response.status_code}')
         logger.debug(f'API response content: {response.text}')
@@ -66,18 +68,23 @@ def worker():
     
     while True:
         transaction_id = id_queue.get()
+        logger.info(f"Retrieved transaction ID {transaction_id} from queue")
         
         # Wait for 2 minutes before processing
+        logger.info(f"Waiting for {WAIT_BEFORE_PROCESSING} seconds before processing transaction ID {transaction_id}")
         time.sleep(WAIT_BEFORE_PROCESSING)
         
         # Ensure at least 30 seconds have passed since the last API call
         time_since_last_call = time.time() - last_call_time
         if time_since_last_call < MIN_DELAY_BETWEEN_CALLS:
-            time.sleep(MIN_DELAY_BETWEEN_CALLS - time_since_last_call)
+            wait_time = MIN_DELAY_BETWEEN_CALLS - time_since_last_call
+            logger.info(f"Waiting additional {wait_time:.2f} seconds to ensure minimum delay between API calls")
+            time.sleep(wait_time)
         
         process_transaction(transaction_id)
         last_call_time = time.time()
         
+        logger.info(f"Finished processing transaction ID {transaction_id}")
         id_queue.task_done()
 
 @app.route('/webhook', methods=['POST'])
@@ -89,7 +96,9 @@ def webhook():
         # Extract the transaction ID and add it to the queue
         transaction_id = message.get('content', {}).get('id')
         if transaction_id:
+            logger.info(f"Extracted transaction ID {transaction_id} from webhook message")
             id_queue.put(transaction_id)
+            logger.info(f"Added transaction ID {transaction_id} to the processing queue")
             return jsonify({"status": "received", "transaction_id": transaction_id}), 200
         else:
             logger.error("No transaction ID found in the webhook message")
@@ -99,7 +108,7 @@ def webhook():
         return jsonify({"status": "error", "message": str(e)}), 500
 
 if __name__ == '__main__':
-    logger.info("Starting Flask application")
+    logger.info("Starting Flask application and worker thread")
     worker_thread = threading.Thread(target=worker, daemon=True)
     worker_thread.start()
     app.run(host='0.0.0.0', port=5000)
