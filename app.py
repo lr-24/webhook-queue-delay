@@ -17,7 +17,6 @@ def setup_logging():
     logger = logging.getLogger()
     logger.setLevel(logging.INFO)
     logger.addHandler(log_handler)
-    # Add a stream handler to also log to console
     stream_handler = logging.StreamHandler()
     stream_handler.setFormatter(log_formatter)
     logger.addHandler(stream_handler)
@@ -27,16 +26,14 @@ logger = setup_logging()
 
 app = Flask(__name__)
 
-# Queue to hold the webhook messages
-message_queue = Queue()
+# Queue to hold the transaction IDs
+id_queue = Queue()
 
-# Get the base URL, API key, and webhook ID from environment variables
+# Environment variables
 API_BASE_URL = os.getenv('API_BASE_URL', 'https://demo.firefly-iii.org')
 FIREFLY_API_KEY = os.getenv('FIREFLY_API_KEY')
 WEBHOOK_ID = os.getenv('WEBHOOK_ID', '1')
 
-# Default to '1' if not set
-# Log the environment variables for debugging
 logger.info(f"API_BASE_URL: {API_BASE_URL}")
 logger.info(f"FIREFLY_API_KEY: {'*' * len(FIREFLY_API_KEY) if FIREFLY_API_KEY else 'Not Set'}")
 logger.info(f"WEBHOOK_ID: {WEBHOOK_ID}")
@@ -44,15 +41,11 @@ logger.info(f"WEBHOOK_ID: {WEBHOOK_ID}")
 if not all([API_BASE_URL, FIREFLY_API_KEY, WEBHOOK_ID]):
     logger.error("One or more required environment variables are not set.")
 
-# Configurable delays
-INITIAL_DELAY = 120  # seconds before processing any input
-DELAY_BETWEEN_REQUESTS = 30  # seconds between successive API calls
+WAIT_BEFORE_PROCESSING = 120  # 2 minutes
+MIN_DELAY_BETWEEN_CALLS = 30  # 30 seconds
 
-def process_message(message):
+def process_transaction(transaction_id):
     try:
-        transaction_id = message['content']['id']
-        logger.info(f"Processing transaction ID: {transaction_id}")
-        
         api_url = f'{API_BASE_URL}/api/v1/webhooks/{WEBHOOK_ID}/trigger-transaction/{transaction_id}'
         headers = {
             'accept': '/',
@@ -60,41 +53,32 @@ def process_message(message):
             'Content-Type': 'application/json'
         }
         
-        # Send an empty JSON object as data
         response = requests.post(api_url, headers=headers, json={})
         logger.info(f'API response for transaction {transaction_id}: Status {response.status_code}')
         logger.debug(f'API response content: {response.text}')
-    except KeyError:
-        logger.error(f"Failed to extract transaction ID from message: {message}")
     except requests.RequestException as e:
         logger.error(f"API request failed for transaction {transaction_id}: {str(e)}")
     except Exception as e:
-        logger.exception(f"Unexpected error processing message: {str(e)}")
+        logger.exception(f"Unexpected error processing transaction {transaction_id}: {str(e)}")
 
 def worker():
-    # Initial delay before starting the processing
-    logger.info(f"Worker will start processing after {INITIAL_DELAY} seconds.")
-    time.sleep(INITIAL_DELAY)
-    
-    last_request_time = time.time()
+    last_call_time = 0
     
     while True:
-        message = message_queue.get()
+        transaction_id = id_queue.get()
         
-        # Ensure a delay between successive API calls
-        current_time = time.time()
-        elapsed_time = current_time - last_request_time
+        # Wait for 2 minutes before processing
+        time.sleep(WAIT_BEFORE_PROCESSING)
         
-        if elapsed_time < DELAY_BETWEEN_REQUESTS:
-            sleep_time = DELAY_BETWEEN_REQUESTS - elapsed_time
-            logger.info(f"Sleeping for {sleep_time} seconds to maintain delay between API calls.")
-            time.sleep(sleep_time)
+        # Ensure at least 30 seconds have passed since the last API call
+        time_since_last_call = time.time() - last_call_time
+        if time_since_last_call < MIN_DELAY_BETWEEN_CALLS:
+            time.sleep(MIN_DELAY_BETWEEN_CALLS - time_since_last_call)
         
-        process_message(message)
-        message_queue.task_done()
+        process_transaction(transaction_id)
+        last_call_time = time.time()
         
-        # Update the last request time
-        last_request_time = time.time()
+        id_queue.task_done()
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
@@ -102,16 +86,20 @@ def webhook():
         message = request.json
         logger.info(f"Received webhook message: {message}")
         
-        # Add the message to the queue
-        message_queue.put(message)
-        return jsonify({"status": "received"}), 200
+        # Extract the transaction ID and add it to the queue
+        transaction_id = message.get('content', {}).get('id')
+        if transaction_id:
+            id_queue.put(transaction_id)
+            return jsonify({"status": "received", "transaction_id": transaction_id}), 200
+        else:
+            logger.error("No transaction ID found in the webhook message")
+            return jsonify({"status": "error", "message": "No transaction ID found"}), 400
     except Exception as e:
         logger.exception(f"Error handling webhook request: {str(e)}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
 if __name__ == '__main__':
     logger.info("Starting Flask application")
-    # Start the worker thread
     worker_thread = threading.Thread(target=worker, daemon=True)
     worker_thread.start()
     app.run(host='0.0.0.0', port=5000)
