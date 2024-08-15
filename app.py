@@ -84,6 +84,7 @@ def worker():
         # Ensure a delay between successive API calls
         current_time = time.time()
         elapsed_time = current_time - last_request_time
+        
         if elapsed_time < DELAY_BETWEEN_REQUESTS:
             sleep_time = DELAY_BETWEEN_REQUESTS - elapsed_time
             logger.info(f"Sleeping for {sleep_time} seconds to maintain delay between API calls.")
