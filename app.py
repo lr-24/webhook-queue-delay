@@ -5,11 +5,12 @@ Receives the "new transaction" webhook from Firefly III, waits a little, then as
 
 Changes of 2026-10-10:
   * the queue is saved to a file (QUEUE_FILE) after every change, so a restart does not lose the pending transactions;
-  * a failed call is tried again after 1 min, 5 min, 15 min, 1 h, 6 h (RETRY_DELAYS); after the last attempt the
-    transaction is written to the "abbandonate" list of the queue file and logged as "Giving up";
+  * a failed call is tried again after 1 min, 5 min, 15 min, 1 h, 6 h (RETRY_DELAYS) and then every 6 hours (the last
+    delay is repeated) for as long as it takes: a transaction is never dropped because Firefly was down or the token
+    expired; it leaves the queue only when the call succeeds or Firefly says the transaction no longer exists (404);
   * the same transaction is never queued twice;
   * every call has a timeout, and the answer of Firefly III is checked (404 = transaction gone: no retry);
-  * GET /health shows how many transactions wait, how old the oldest is and how many were given up.
+  * GET /health shows how many transactions wait, how old the oldest is and how many keep failing.
 """
 from flask import Flask, request, jsonify
 import json
@@ -51,7 +52,6 @@ WAIT_BEFORE_PROCESSING = float(os.getenv('WAIT_BEFORE_PROCESSING', '30'))   # se
 MIN_DELAY_BETWEEN_CALLS = float(os.getenv('MIN_DELAY_BETWEEN_CALLS', '29'))  # seconds between two calls to Firefly III
 RETRY_DELAYS = [float(x) for x in os.getenv('RETRY_DELAYS', '60,300,900,3600,21600').split(',') if x.strip()]
 REQUEST_TIMEOUT = float(os.getenv('REQUEST_TIMEOUT', '30'))
-MAX_ABANDONED_KEPT = 200
 
 logger.info(f"API_BASE_URL: {API_BASE_URL}")
 logger.info(f"FIREFLY_API_KEY: {'*' * len(FIREFLY_API_KEY) if FIREFLY_API_KEY else 'Not Set'}")
@@ -64,8 +64,6 @@ if not all([API_BASE_URL, FIREFLY_API_KEY, WEBHOOK_ID]):
 lock = threading.Lock()
 # transaction id (str) -> {"id", "received", "next_try", "attempts", "last_error"}
 pending = {}
-# transactions that could not be processed after all the attempts (most recent last)
-abandoned = []
 started_at = time.time()
 last_result = {"when": None, "transaction": None, "result": None}
 
@@ -76,7 +74,7 @@ def save_state():
         os.makedirs(os.path.dirname(QUEUE_FILE), exist_ok=True)
         tmp = QUEUE_FILE + '.tmp'
         with open(tmp, 'w') as f:
-            json.dump({"pending": list(pending.values()), "abandoned": abandoned[-MAX_ABANDONED_KEPT:]}, f)
+            json.dump({"pending": list(pending.values())}, f)
             f.flush()
             os.fsync(f.fileno())
         os.replace(tmp, QUEUE_FILE)
@@ -86,7 +84,6 @@ def save_state():
 
 def load_state():
     """Reads the queue saved by a previous run."""
-    global abandoned
     if not os.path.exists(QUEUE_FILE):
         return
     try:
@@ -94,8 +91,7 @@ def load_state():
             data = json.load(f)
         for item in data.get("pending", []):
             pending[str(item["id"])] = item
-        abandoned = list(data.get("abandoned", []))
-        logger.info(f"Loaded {len(pending)} pending transactions and {len(abandoned)} abandoned ones from {QUEUE_FILE}")
+        logger.info(f"Loaded {len(pending)} pending transactions from {QUEUE_FILE}")
     except Exception as e:
         broken = f"{QUEUE_FILE}.corrupt-{int(time.time())}"
         logger.error(f"Queue file unreadable ({e}): moved to {broken}, starting with an empty queue")
@@ -165,15 +161,10 @@ def worker():
             else:
                 item["attempts"] += 1
                 item["last_error"] = detail
-                if item["attempts"] <= len(RETRY_DELAYS):
-                    delay = RETRY_DELAYS[item["attempts"] - 1]
-                    item["next_try"] = time.time() + delay
-                    logger.warning(f"Transaction {transaction_id} failed ({detail}); attempt {item['attempts']} of {len(RETRY_DELAYS) + 1}, trying again in {delay:.0f} seconds")
-                else:
-                    del pending[transaction_id]
-                    abandoned.append({"id": transaction_id, "received": item["received"], "abandoned": time.time(),
-                                      "attempts": item["attempts"], "last_error": detail})
-                    logger.error(f"Giving up on transaction {transaction_id} after {item['attempts']} attempts ({detail})")
+                # 1 min, 5 min, 15 min, 1 h, 6 h, then every 6 h until it works or the transaction is gone (404)
+                delay = RETRY_DELAYS[min(item["attempts"], len(RETRY_DELAYS)) - 1]
+                item["next_try"] = time.time() + delay
+                logger.warning(f"Transaction {transaction_id} failed ({detail}); attempt {item['attempts']} failed, trying again in {delay:.0f} seconds")
             last_result.update({"when": time.time(), "transaction": transaction_id, "result": result})
             save_state()
 
@@ -217,8 +208,8 @@ def health():
             "pending": len(pending),
             "oldest_pending_seconds": int(oldest),
             "pending_with_failed_attempts": retrying,
-            "abandoned_total": len(abandoned),
-            "last_abandoned": abandoned[-1] if abandoned else None,
+            "max_failed_attempts": max((i["attempts"] for i in pending.values()), default=0),
+            "last_error": max(pending.values(), key=lambda i: i["attempts"])["last_error"] if retrying else None,
             "last_result": dict(last_result),
             "up_seconds": int(now - started_at),
         }), 200
